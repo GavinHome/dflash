@@ -60,6 +60,9 @@ uv pip install -r requirements.txt
 
 ```bash
 export SGLANG_ALLOW_OVERWRITE_LONGER_CONTEXT_LEN=1
+export SGLANG_ENABLE_SPEC_V2=1
+export SGLANG_ENABLE_DFLASH_SPEC_V2=1
+export SGLANG_ENABLE_OVERLAP_PLAN_STREAM=1
 
 python -m sglang.launch_server \
     --model-path Qwen/Qwen3-Coder-30B-A3B-Instruct \
