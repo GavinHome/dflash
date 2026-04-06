@@ -136,7 +136,7 @@ python -m sglang.launch_server \
 
 Then benchmark against the running server:
 ```bash
-python benchmark.py --backend sglang \
+python -m dflash.benchmark --backend sglang \
     --base-url http://127.0.0.1:30000 \
     --model Qwen/Qwen3-Coder-30B-A3B-Instruct \
     --dataset humaneval \
@@ -175,7 +175,7 @@ vllm serve Qwen/Qwen3.5-27B \
 
 Then benchmark against the running server:
 ```bash
-python benchmark.py --backend vllm \
+python -m dflash.benchmark --backend vllm \
     --base-url http://127.0.0.1:8000 \
     --model Qwen/Qwen3.5-27B \
     --dataset humaneval \
@@ -184,19 +184,29 @@ python benchmark.py --backend vllm \
 ```
 
 ## 📊 Evaluation
-We provide scripts to reproduce the speedup and acceptance length metrics in the paper. The reported results were tested on NVIDIA H200 or B200 GPUs. **Please note that only Qwen3 series and LLaMA-3.1 models support Transformers backend benchmark. For other models please use SGLang to run the benchmarks.**
+We provide a unified benchmark to reproduce the speedup and acceptance length metrics in the paper. The reported results were tested on NVIDIA H200 or B200 GPUs. **Please note that only Qwen3 series and LLaMA-3.1 models support Transformers backend benchmark. For other models please use SGLang to run the benchmarks.**
 
 All benchmarks share the same datasets (gsm8k, math500, humaneval, mbpp, mt-bench). Datasets are automatically downloaded and cached as JSONL in `cache/` on first run.
 
+**Transformers** (Part 1 install only):
 ```bash
-# Transformers (Part 1 install only)
-BACKEND=transformers bash run_benchmark.sh
+torchrun --nproc_per_node=8 -m dflash.benchmark --backend transformers \
+    --model Qwen/Qwen3-4B --draft-model z-lab/Qwen3-4B-DFlash-b16 \
+    --dataset gsm8k --max-samples 128 --max-new-tokens 2048
+```
 
-# SGLang (requires Part 2 install, server must be running)
-BACKEND=sglang MODEL=Qwen/Qwen3.5-9B BASE_URL=http://127.0.0.1:30000 bash run_benchmark.sh
+**SGLang** (requires Part 2 install, server must be running):
+```bash
+python -m dflash.benchmark --backend sglang \
+    --base-url http://127.0.0.1:30000 --model Qwen/Qwen3.5-9B \
+    --dataset gsm8k --num-prompts 1024 --concurrency 32
+```
 
-# vLLM (requires Part 3 install, server must be running)
-BACKEND=vllm MODEL=Qwen/Qwen3.5-27B BASE_URL=http://127.0.0.1:8000 bash run_benchmark.sh
+**vLLM** (requires Part 3 install, server must be running):
+```bash
+python -m dflash.benchmark --backend vllm \
+    --base-url http://127.0.0.1:8000 --model Qwen/Qwen3.5-27B \
+    --dataset gsm8k --num-prompts 1024 --concurrency 32
 ```
 
 

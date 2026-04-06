@@ -25,7 +25,7 @@ from transformers.cache_utils import Cache
 # Dataset loading (auto-downloads from HuggingFace on first use)
 # ---------------------------------------------------------------------------
 
-CACHE_DIR = Path(__file__).parent / "cache"
+CACHE_DIR = Path(__file__).parent.parent / "cache"
 
 DATASETS = {
     "gsm8k": {

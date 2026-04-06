@@ -2,17 +2,17 @@
 
 Usage:
     # Transformers (local inference):
-    torchrun --nproc_per_node=8 benchmark.py --backend transformers \
+    torchrun --nproc_per_node=8 -m dflash.benchmark --backend transformers \
         --model Qwen/Qwen3-4B --draft-model z-lab/Qwen3-4B-DFlash-b16 \
         --dataset gsm8k --max-samples 128
 
     # SGLang (against a running server):
-    python benchmark.py --backend sglang \
+    python -m dflash.benchmark --backend sglang \
         --base-url http://127.0.0.1:30000 --model Qwen/Qwen3.5-9B \
         --dataset gsm8k --num-prompts 1024 --concurrency 32
 
     # vLLM (against a running server):
-    python benchmark.py --backend vllm \
+    python -m dflash.benchmark --backend vllm \
         --base-url http://127.0.0.1:8000 --model Qwen/Qwen3.5-27B \
         --dataset gsm8k --num-prompts 1024 --concurrency 32
 """
@@ -39,7 +39,7 @@ from rich import print
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer, DynamicCache
 
-from model import DFlashDraftModel, sample, load_and_process_dataset, extract_context_feature
+from .model import DFlashDraftModel, sample, load_and_process_dataset, extract_context_feature
 
 
 # ---------------------------------------------------------------------------
