@@ -1,9 +1,10 @@
 import json
+import math
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from threading import RLock
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import mlx.core as mx
 import mlx.nn as nn
@@ -40,6 +41,73 @@ class DFlashConfig:
     target_layer_ids: Tuple[int, ...]
     num_target_layers: int
     mask_token_id: int = 0
+    rope_scaling: Optional[Dict[str, Any]] = None
+
+
+def _build_rope(head_dim: int, rope_theta: float, rope_scaling: Optional[Dict[str, Any]]):
+    if not rope_scaling:
+        return nn.RoPE(head_dim, traditional=False, base=rope_theta)
+    rope_type = rope_scaling.get("rope_type") or rope_scaling.get("type")
+    if rope_type in (None, "default"):
+        return nn.RoPE(head_dim, traditional=False, base=rope_theta)
+    if rope_type == "yarn":
+        return YarnRoPE(
+            head_dim,
+            base=rope_theta,
+            factor=float(rope_scaling["factor"]),
+            original_max_position_embeddings=int(rope_scaling["original_max_position_embeddings"]),
+            beta_fast=float(rope_scaling.get("beta_fast") or 32.0),
+            beta_slow=float(rope_scaling.get("beta_slow") or 1.0),
+            mscale=rope_scaling.get("mscale"),
+            mscale_all_dim=rope_scaling.get("mscale_all_dim"),
+        )
+    raise ValueError(f"Unsupported rope_type: {rope_type!r}")
+
+
+class YarnRoPE(nn.Module):
+    def __init__(self, dims, base, factor, original_max_position_embeddings,
+                 beta_fast=32.0, beta_slow=1.0, mscale=None, mscale_all_dim=None):
+        super().__init__()
+        self.dims = dims
+        self._freqs = self._yarn_inv_freq(
+            dims, base, factor, original_max_position_embeddings, beta_fast, beta_slow,
+        )
+        self._scale = self._attention_scaling(factor, mscale, mscale_all_dim)
+
+    @staticmethod
+    def _yarn_inv_freq(dim, base, factor, original_max_pos, beta_fast, beta_slow):
+        pos_freqs = base ** (mx.arange(0, dim, 2, dtype=mx.float32) / dim)
+        inv_extra = 1.0 / pos_freqs
+        inv_inter = 1.0 / (factor * pos_freqs)
+
+        def correction_dim(num_rot):
+            return (dim * math.log(original_max_pos / (num_rot * 2 * math.pi))) / (2 * math.log(base))
+
+        low = max(math.floor(correction_dim(beta_fast)), 0)
+        high = min(math.ceil(correction_dim(beta_slow)), dim - 1)
+        if low == high:
+            high += 0.001
+
+        ramp = mx.clip((mx.arange(dim // 2, dtype=mx.float32) - low) / (high - low), 0, 1)
+        extra_factor = 1.0 - ramp
+        return inv_inter * (1.0 - extra_factor) + inv_extra * extra_factor
+
+    @staticmethod
+    def _attention_scaling(factor, mscale, mscale_all_dim):
+        def get_mscale(scale, m=1.0):
+            if scale <= 1:
+                return 1.0
+            return 0.1 * m * math.log(scale) + 1.0
+        if mscale and mscale_all_dim:
+            return float(get_mscale(factor, mscale) / get_mscale(factor, mscale_all_dim))
+        return get_mscale(factor)
+
+    def __call__(self, x, offset=0):
+        out = mx.fast.rope(
+            x, self.dims, traditional=False, base=None, scale=1.0,
+            offset=offset, freqs=self._freqs,
+        )
+        return out * self._scale if self._scale != 1.0 else out
 
 
 class DFlashAttention(nn.Module):
@@ -93,7 +161,7 @@ class DFlashDraftModel(nn.Module):
         self.hidden_norm = nn.RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.layers = [DFlashDecoderLayer(config) for _ in range(config.num_hidden_layers)]
         self.norm = nn.RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
-        self.rope = nn.RoPE(config.head_dim, traditional=False, base=config.rope_theta)
+        self.rope = _build_rope(config.head_dim, config.rope_theta, config.rope_scaling)
         self.embed_tokens = None
         self.lm_head = None
 
@@ -147,6 +215,7 @@ def load_draft(draft_id: str) -> DFlashDraftModel:
         target_layer_ids=tuple(cfg["dflash_config"]["target_layer_ids"]),
         num_target_layers=cfg["num_target_layers"],
         mask_token_id=cfg["dflash_config"]["mask_token_id"],
+        rope_scaling=cfg.get("rope_scaling"),
     )
     weights = {k: v for f in path.glob("*.safetensors") for k, v in mx.load(str(f)).items()}
     model = DFlashDraftModel(config)
